@@ -1,144 +1,250 @@
-import pandas as pd
-
-# Load the combined data
-combined_data = pd.read_csv('combined_data.csv')
-
-# Convert 'periodname' to datetime if it's not already
-combined_data['periodname'] = pd.to_datetime(combined_data['periodname'], errors='coerce')
-
-# Drop rows with NaN values in 'periodname'
-combined_data.dropna(subset=['periodname'], inplace=True)
-
-# Aggregate data to the monthly level
-combined_data.set_index('periodname', inplace=True)
-monthly_data = combined_data.resample('M').sum()
-
-# Reset index to make 'periodname' a column again
-monthly_data.reset_index(inplace=True)
-
-# Debug print: Check the first few rows of the aggregated data
-print(monthly_data.head())
-
-# Save the preprocessed data to a new CSV file
-monthly_data.to_csv('preprocessed_data.csv', index=False)
-import pandas as pd
-from statsmodels.tsa.arima.model import ARIMA
-import matplotlib.pyplot as plt
-
-# Load the preprocessed data
-monthly_data = pd.read_csv('preprocessed_data.csv', parse_dates=['periodname'])
-
-# Set 'periodname' as the index
-monthly_data.set_index('periodname', inplace=True)
-
-# Select a column for forecasting (e.g., 'Male Condoms')
-data_column = 'Male Condoms'
-series = monthly_data[data_column].dropna()
-
-# Split the data into training and test sets
-train_size = int(len(series) * 0.8)
-train, test = series[:train_size], series[train_size:]
-
-# Fit the ARIMA model
-model = ARIMA(train, order=(5,1,0))  # Adjust order as necessary
-model_fit = model.fit()
-
-# Forecast
-forecast = model_fit.forecast(steps=len(test))
-
-# Plot the results
-plt.figure(figsize=(12, 6))
-plt.plot(train, label='Training Data')
-plt.plot(test.index, test, label='Actual Data')
-plt.plot(test.index, forecast, label='Forecast')
-plt.xlabel('Date')
-plt.ylabel(data_column)
-plt.title(f'Forecast vs Actual for {data_column}')
-plt.legend()
-plt.show()
 import streamlit as st
 import pandas as pd
 import numpy as np
+np.float_ = np.float64
 from plotly import graph_objs as go
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-# Load the data
-data_file_path = 'combined_data.csv'
-combined_data = pd.read_csv(data_file_path)
+# Function to load data
+def load_data():
+    consumption_file_path = 'data (25).csv'
+    service_file_path = 'data (27).csv'
+    consumption_data = pd.read_csv(consumption_file_path)
+    service_data = pd.read_csv(service_file_path)
 
-# Convert 'periodname' to datetime
-combined_data['periodname'] = pd.to_datetime(combined_data['periodname'], format='%b-%y', errors='coerce')
+    # Add a 'type' column to differentiate between consumption and service
+    consumption_data['type'] = 'consumption'
+    service_data['type'] = 'service'
 
-# Set page title
-st.title("Family Planning Commodities Analysis")
+    # Concatenate the dataframes
+    combined_data = pd.concat([consumption_data, service_data], ignore_index=True)
 
-# Filters for selecting product, organization, and data type
-products = [
-    'Male Condoms', 'Female Condoms', 'EC Pills', 'COCs', 'POPs',
-    'Cycle Beads', 'DMPA-IM', 'DMPA-SC', 'Implanon', '2 Rod',
-    'Hormonal IUCD', 'Non-Hormonal IUCD', 'Levoplant', 'Jadelle'
-]
+    # Melting the DataFrame to long format
+    long_data = combined_data.melt(id_vars=['periodid', 'organisationunitname', 'type'],
+                                   var_name='product_description', value_name='quantity')
 
-organizations = combined_data['organisationunitname'].unique()
-data_types = ['Consumption', 'Service', 'Both']
+    # Check for null values in 'quantity' and fill with 0
+    long_data['quantity'].fillna(0, inplace=True)
 
-selected_product = st.selectbox("Select Product", products)
-selected_organization = st.selectbox("Select Organization", organizations)
-selected_data_type = st.selectbox("Select Data Type", data_types)
+    # Mapping dictionary based on the given data
+    COLUMN_MAPPING = {
+        'MOH 747A_Male Condoms': 'Male Condoms',
+        'MOH 711 Client receiving Male condoms': 'Male Condoms',
+        'MOH 747A_Female Condoms': 'Female Condoms',
+        'MOH 711 Clients receiving Female Condoms': 'Female Condoms',
+        'MOH 747A_Emergency Contraceptive pills': 'EC Pills',
+        'MOH 711 Emergency contraceptive pill': 'EC Pills',
+        'MOH 747A_Combined Oral contraceptive Pills': 'COCs',
+        'MOH 711 Pills Combined oral contraceptive': 'COCs',
+        'MOH 747A_Progestin only pills': 'POPs',
+        'MOH 711 Pills progestin only': 'POPs',
+        'MOH 747A_Cycle Beads': 'Cycle Beads',
+        'MOH 711 Rev 2020_Clients given cycle beads': 'Cycle Beads',
+        'MOH 747A_DMPA-IM': 'DMPA-IM',
+        'MOH 711 Rev 2020_FP Injections DMPA- IM': 'DMPA-IM',
+        'MOH 747A_DMPA-SC': 'DMPA-SC',
+        'MOH 711 Rev 2020_FP Injections DMPA- SC': 'DMPA-SC',
+        'MOH 747A_Implants (1-Rod) – ENG 68mg': 'Implanon',
+        'MOH 711 Rev 2020_Implants insertion 1 Rod': 'Implanon',
+        'MOH 711 Rev 2020_Implants insertion 2 Rod': '2 Rod',
+        'MOH 747A_Hormonal IUCD': 'Hormonal IUCD',
+        'MOH 711 Rev 2020_IUCD Insertion Hormonal': 'Hormonal IUCD',
+        'MOH 747A_Non-Hormonal IUCD': 'Non-Hormonal IUCD',
+        'MOH 711 Rev 2020_IUCD Insertion Non Hormonal': 'Non-Hormonal IUCD',
+        'MOH 747A_Implants (2-Rod) - LNG 75mg (3 years)': 'Levoplant',
+        'MOH 747A_Implant (2-Rod) – LNG 75mg (5 years)': 'Jadelle'
+    }
 
-# Filter data based on selections
-if selected_data_type == 'Consumption':
-    filtered_data = combined_data[(combined_data[selected_product].notna()) & (combined_data['Type'] == 'Consumption')]
-elif selected_data_type == 'Service':
-    filtered_data = combined_data[(combined_data[selected_product].notna()) & (combined_data['Type'] == 'Service')]
-else:
-    filtered_data = combined_data[combined_data[selected_product].notna()]
+    # Function to map common names
+    def map_common_name(description):
+        for key, value in COLUMN_MAPPING.items():
+            if key in description:
+                return value
+        return 'Unknown'
 
-filtered_data = filtered_data[filtered_data['organisationunitname'] == selected_organization]
+    # Apply the mapping function
+    long_data['common_name'] = long_data['product_description'].apply(map_common_name)
 
-# Interactive plot to show data labels
-def plot_interactive(data, title):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=data['periodname'], y=data[selected_product], mode='lines+markers', name=title, text=data[selected_product], hoverinfo='text'))
+    # Remove rows with 'Unknown' common_name if necessary
+    long_data = long_data[long_data['common_name'] != 'Unknown']
 
-    fig.update_layout(
-        title=title,
-        xaxis_title='Period',
-        yaxis_title='Quantity',
-        hovermode='closest'
-    )
-    return fig
+    # Aggregating the data by common_name, periodid, and organisationunitname
+    aggregated_data = long_data.groupby(['common_name', 'periodid', 'organisationunitname', 'type']).agg({'quantity': 'sum'}).reset_index()
 
-# Buttons for showing trends and forecasts
-if st.button("Show Trend"):
-    st.subheader(f"Trend for {selected_product} in {selected_organization}")
-    if selected_data_type == 'Both':
-        consumption_data = filtered_data[filtered_data['Type'] == 'Consumption']
-        service_data = filtered_data[filtered_data['Type'] == 'Service']
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=consumption_data['periodname'], y=consumption_data[selected_product], mode='lines+markers', name='Consumption', text=consumption_data[selected_product], hoverinfo='text'))
-        fig.add_trace(go.Scatter(x=service_data['periodname'], y=service_data[selected_product], mode='lines+markers', name='Service', text=service_data[selected_product], hoverinfo='text'))
-        fig.update_layout(title=f"Trend for {selected_product} in {selected_organization}", xaxis_title='Period', yaxis_title='Quantity', hovermode='closest')
+    # Ensure 'quantity' is numeric
+    aggregated_data['quantity'] = pd.to_numeric(aggregated_data['quantity'], errors='coerce')
+
+    # Fill missing values with 0
+    aggregated_data['quantity'].fillna(0, inplace=True)
+
+    return aggregated_data
+
+data = load_data()
+
+# Streamlit app
+st.set_page_config(page_title="Trend and Forecast App", page_icon="📈")
+
+# Sidebar
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to", ["Trend and Forecast", "Product Comparison"])
+
+if page == "Trend and Forecast":
+    st.title('Family Planning Forecast Tool')
+
+    # Add clickable link
+    st.sidebar.markdown("[InSupply Health](https://insupplyhealth.com/)")
+
+    # Sidebar filters
+    product = st.sidebar.selectbox('Select Product', data['common_name'].unique())
+    county = st.sidebar.selectbox('Select County', ['Kenya'] + list(data['organisationunitname'].unique()))
+    type_options = ['consumption', 'service', 'both']
+    selected_type = st.sidebar.selectbox('Select Type', type_options)
+
+    # Filter data based on selections
+    if county == 'Kenya':
+        filtered_data = data[data['common_name'] == product]
     else:
-        fig = plot_interactive(filtered_data, f"Trend for {selected_product} in {selected_organization}")
+        filtered_data = data[(data['common_name'] == product) & (data['organisationunitname'] == county)]
 
-    st.plotly_chart(fig)
+    # Convert periodid to datetime format
+    filtered_data['periodid'] = pd.to_datetime(filtered_data['periodid'], format='%Y%m', errors='coerce')
 
-if st.button("Show Forecast"):
-    st.subheader(f"Forecast for {selected_product} in {selected_organization}")
-    model = ExponentialSmoothing(filtered_data[selected_product], seasonal='add', seasonal_periods=12).fit()
-    forecast = model.forecast(steps=12)
-    forecast_index = pd.date_range(start=filtered_data['periodname'].iloc[-1], periods=12, freq='M')
+    if selected_type == 'both':
+        st.subheader(f'Trend for {product} in {county}')
+        
+        # Separate data for consumption and service
+        consumption_data = filtered_data[filtered_data['type'] == 'consumption']
+        service_data = filtered_data[filtered_data['type'] == 'service']
 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=filtered_data['periodname'], y=filtered_data[selected_product], mode='lines+markers', name='Actual', text=filtered_data[selected_product], hoverinfo='text'))
-    fig.add_trace(go.Scatter(x=forecast_index, y=forecast, mode='lines+markers', name='Forecast', text=forecast, hoverinfo='text'))
+        # Aggregate data by period
+        aggregated_consumption = consumption_data.groupby('periodid')['quantity'].sum().reset_index()
+        aggregated_service = service_data.groupby('periodid')['quantity'].sum().reset_index()
 
-    fig.update_layout(title=f"Forecast for {selected_product} in {selected_organization}", xaxis_title='Period', yaxis_title='Quantity', hovermode='closest')
-    st.plotly_chart(fig)
+        # Create interactive plots for consumption and service
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=aggregated_consumption['periodid'], y=aggregated_consumption['quantity'],
+                                 mode='lines+markers', name='Consumption'))
+        fig.add_trace(go.Scatter(x=aggregated_service['periodid'], y=aggregated_service['quantity'],
+                                 mode='lines+markers', name='Service'))
+        fig.update_layout(title=f'Trend of {product} in {county}', xaxis_title='Period', yaxis_title='Quantity')
+        st.plotly_chart(fig)
 
-    # Display forecast table
-    forecast_table = pd.DataFrame({'Date': forecast_index, 'Forecasted Quantity': forecast})
-    st.subheader("Forecast Table")
-    st.table(forecast_table)
+        # Forecasting for both types separately
+        st.subheader(f'Forecast for {product} in {county}')
 
+        for data_type, data_label in zip([aggregated_consumption, aggregated_service], ['Consumption', 'Service']):
+            if not data_type.empty:
+                model = SARIMAX(data_type['quantity'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12))
+                model_fit = model.fit(disp=False)
+                forecast = model_fit.get_forecast(steps=12)
+                forecast_index = pd.date_range(start=data_type['periodid'].iloc[-1], periods=13, freq='M')[1:]
+                forecast_values = forecast.predicted_mean
+                conf_int = forecast.conf_int()
+                conf_int.columns = ['lower', 'upper']
+                forecast_values = np.maximum(forecast_values, 0)
+                conf_int['lower'] = np.maximum(conf_int['lower'], 0)
+                conf_int['upper'] = np.maximum(conf_int['upper'], 0)
+
+                # Plot forecast
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=data_type['periodid'], y=data_type['quantity'],
+                                         mode='lines+markers', name='Observed'))
+                fig.add_trace(go.Scatter(x=forecast_index, y=forecast_values,
+                                         mode='lines+markers', name='Forecast'))
+                fig.add_trace(go.Scatter(x=forecast_index, y=conf_int['upper'], fill=None, mode='lines',
+                                         line=dict(color='gray'), showlegend=False))
+                fig.add_trace(go.Scatter(x=forecast_index, y=conf_int['lower'], fill='tonexty', mode='lines',
+                                         line=dict(color='gray'), fillcolor='rgba(0,100,80,0.2)', showlegend=False))
+                fig.update_layout(title=f'{data_label} Forecast of {product} in {county}', xaxis_title='Date', yaxis_title='Quantity')
+                st.plotly_chart(fig)
+
+                # Display forecast table
+                st.subheader(f'{data_label} Forecast Table')
+                forecast_table = pd.DataFrame({
+                    'Date': forecast_index,
+                    'Forecast': forecast_values,
+                    'Lower CI': conf_int['lower'],
+                    'Upper CI': conf_int['upper']
+                })
+                st.write(forecast_table)
+
+    else:
+        filtered_data = filtered_data[filtered_data['type'] == selected_type]
+
+        # Aggregate the data by period
+        aggregated_data = filtered_data.groupby('periodid')['quantity'].sum().reset_index()
+
+        # Display the trend
+        st.subheader(f'Trend for {product} in {county}')
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=aggregated_data['periodid'], y=aggregated_data['quantity'], mode='lines+markers'))
+        fig.update_layout(title=f'Trend of {product} in {county}', xaxis_title='Period', yaxis_title='Quantity')
+        st.plotly_chart(fig)
+
+        # Forecasting
+        st.subheader(f'Forecast for {product} in {county}')
+        model = SARIMAX(aggregated_data['quantity'], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12))
+        model_fit = model.fit(disp=False)
+
+        # Forecast for the next 12 periods
+        forecast = model_fit.get_forecast(steps=12)
+        forecast_index = pd.date_range(start=aggregated_data['periodid'].iloc[-1], periods=13, freq='M')[1:]
+        forecast_values = forecast.predicted_mean
+        conf_int = forecast.conf_int()
+        conf_int.columns = ['lower', 'upper']
+
+        # Adjust forecast values to avoid negatives
+        forecast_values = np.maximum(forecast_values, 0)
+        conf_int['lower'] = np.maximum(conf_int['lower'], 0)
+        conf_int['upper'] = np.maximum(conf_int['upper'], 0)
+
+        # Plot the forecast
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=aggregated_data['periodid'], y=aggregated_data['quantity'], name='Observed', mode='lines+markers'))
+        fig.add_trace(go.Scatter(x=forecast_index, y=forecast_values, name='Forecast', mode='lines+markers'))
+        fig.add_trace(go.Scatter(x=forecast_index, y=conf_int['upper'], fill=None, mode='lines', line=dict(color='gray'), showlegend=False))
+        fig.add_trace(go.Scatter(x=forecast_index, y=conf_int['lower'], fill='tonexty', mode='lines', line=dict(color='gray'), fillcolor='rgba(0,100,80,0.2)', showlegend=False))
+        fig.update_layout(title=f'Forecast of {product} in {county}', xaxis_title='Date', yaxis_title='Quantity')
+        st.plotly_chart(fig)
+
+        # Display forecast table
+        st.subheader('Forecast Table')
+        forecast_table = pd.DataFrame({
+            'Date': forecast_index,
+            'Forecast': forecast_values,
+            'Lower CI': conf_int['lower'],
+            'Upper CI': conf_int['upper']
+        })
+        st.write(forecast_table)
+
+elif page == "Product Comparison":
+    st.title('Product Comparison')
+
+    # Sidebar filters
+    selected_products = st.sidebar.multiselect('Select Products', data['common_name'].unique())
+    county = st.sidebar.selectbox('Select County', ['Kenya'] + list(data['organisationunitname'].unique()))
+    type_options = ['consumption', 'service', 'both']
+    selected_type = st.sidebar.selectbox('Select Type', type_options)
+
+    if selected_products:
+        fig = go.Figure()
+        for product in selected_products:
+            if county == 'Kenya':
+                filtered_data = data[data['common_name'] == product]
+            else:
+                filtered_data = data[(data['common_name'] == product) & (data['organisationunitname'] == county)]
+
+            if selected_type != 'both':
+                filtered_data = filtered_data[filtered_data['type'] == selected_type]
+
+            # Convert periodid to datetime format
+            filtered_data['periodid'] = pd.to_datetime(filtered_data['periodid'], format='%Y%m', errors='coerce')
+
+            # Aggregate the data by period
+            aggregated_data = filtered_data.groupby('periodid')['quantity'].sum().reset_index()
+
+            # Plot the trend for each selected product
+            fig.add_trace(go.Scatter(x=aggregated_data['periodid'], y=aggregated_data['quantity'], mode='lines+markers', name=product))
+
+        fig.update_layout(title=f'Trend Comparison in {county}', xaxis_title='Period', yaxis_title='Quantity')
+        st.plotly_chart(fig)
