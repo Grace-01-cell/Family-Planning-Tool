@@ -5,7 +5,11 @@ np.float_ = np.float64
 from plotly import graph_objs as go
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
+# Ensure page configuration is the first Streamlit command
+st.set_page_config(page_title="Trend and Forecast App", page_icon="📈")
+
 # Function to load data
+@st.cache_data
 def load_data():
     consumption_file_path = 'data (25).csv'
     service_file_path = 'data (27).csv'
@@ -81,9 +85,6 @@ def load_data():
 
 data = load_data()
 
-# Streamlit app
-st.set_page_config(page_title="Trend and Forecast App", page_icon="📈")
-
 # Sidebar
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ["Trend and Forecast", "Product Comparison"])
@@ -101,13 +102,21 @@ if page == "Trend and Forecast":
     selected_type = st.sidebar.selectbox('Select Type', type_options)
 
     # Filter data based on selections
-    if county == 'Kenya':
-        filtered_data = data[data['common_name'] == product]
-    else:
-        filtered_data = data[(data['common_name'] == product) & (data['organisationunitname'] == county)]
+    @st.cache_data
+    def filter_data(product, county, selected_type, data):
+        if county == 'Kenya':
+            filtered_data = data[data['common_name'] == product]
+        else:
+            filtered_data = data[(data['common_name'] == product) & (data['organisationunitname'] == county)]
 
-    # Convert periodid to datetime format
-    filtered_data['periodid'] = pd.to_datetime(filtered_data['periodid'], format='%Y%m', errors='coerce')
+        if selected_type != 'both':
+            filtered_data = filtered_data[filtered_data['type'] == selected_type]
+
+        filtered_data['periodid'] = pd.to_datetime(filtered_data['periodid'], format='%Y%m', errors='coerce')
+        
+        return filtered_data
+
+    filtered_data = filter_data(product, county, selected_type, data)
 
     if selected_type == 'both':
         st.subheader(f'Trend for {product} in {county}')
